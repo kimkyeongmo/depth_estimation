@@ -52,7 +52,7 @@ def get_novel_calib(data, opt, ratio=0.5, intr_key='intr', extr_key='extr'):
     data['novel_view']['world_view_transform'] = torch.concat(world_view_transform_list).cuda()
     data['novel_view']['full_proj_transform'] = torch.concat(full_proj_transform_list).cuda()
     data['novel_view']['camera_center'] = torch.concat(camera_center_list).cuda()
-    return data
+    return data, projection_matrix
 
 
 def get_novel_calib_for_show(data, ratio=0.5, intr_key='intr', extr_key='extr'):

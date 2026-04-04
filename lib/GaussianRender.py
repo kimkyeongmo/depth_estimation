@@ -2,12 +2,12 @@
 import torch
 from gaussian_renderer import render
 
-
-def pts2render(data,data_r,data_or, bg_color):
+#Stereo/HMD Rendering Pipeline
+def pts2render(data,data_r, bg_color):
     bs = data['lmain']['img'].shape[0]
     render_novel_list = []
     render_novel_list_r = []
-    render_novel_list_or = []
+    #render_novel_list_or = []
     for i in range(bs):
         xyz_i_valid = []
         rgb_i_valid = []
@@ -37,12 +37,12 @@ def pts2render(data,data_r,data_or, bg_color):
 
         render_novel_i = render(data, i, pts_xyz_i, pts_rgb_i, rot_i, scale_i, opacity_i, bg_color=bg_color)
         render_novel_r = render(data_r, i, pts_xyz_i, pts_rgb_i, rot_i, scale_i, opacity_i, bg_color=bg_color)
-        render_novel_or = render(data_or, i, pts_xyz_i, pts_rgb_i, rot_i, scale_i, opacity_i, bg_color=bg_color)
+        #render_novel_or = render(data_or, i, pts_xyz_i, pts_rgb_i, rot_i, scale_i, opacity_i, bg_color=bg_color)
         render_novel_list.append(render_novel_i.unsqueeze(0))
         render_novel_list_r.append(render_novel_r.unsqueeze(0))
-        render_novel_list_or.append(render_novel_or.unsqueeze(0))
+        #render_novel_list_or.append(render_novel_or.unsqueeze(0))
 
     data['novel_view']['img_pred'] = torch.concat(render_novel_list, dim=0)
     data_r['novel_view']['img_pred'] = torch.concat(render_novel_list_r, dim=0)
-    data_or['novel_view']['img_pred'] = torch.concat(render_novel_list_or, dim=0)
-    return data, data_r, data_or
+    #data_or['novel_view']['img_pred'] = torch.concat(render_novel_list_or, dim=0)
+    return data, data_r

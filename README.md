@@ -22,19 +22,12 @@ cd ..
 아래 명령어를 통해 특정 데이터셋에 대한 양안 결과물을 생성할 수 있습니다.
 ```bash
 python test_real_data.py \
---test_data_root 'PATH/TO/REAL_DATA' \
---ckpt_path 'PATH/TO/GPS-GS_stage2_final.pth' \
+--test_data_root 'Dataset Path' \
+--ckpt_path 'Model' \
 --src_view 0 1 \
 --ratio=0.5
 ```
 
-```bash
-python test_real_data.py \
-    --test_data_root [데이터셋_경로] \
-    --ckpt_path ./[Model] \
-    --src_view 0 1 \
-    --ratio 0.5
-```
 --src_view: 참고할 소스 뷰 인덱스
 
 --ratio: 시점 보간 비율 (0.5는 중간 지점)

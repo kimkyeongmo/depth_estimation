@@ -37,29 +37,32 @@ class StereoHumanRender:
         for idx in tqdm(range(total_frames)):
             item = self.dataset.get_test_item(idx, source_id=view_select)
             data = self.fetch_data(item)
-            data = get_novel_calib(data, self.cfg.dataset, ratio=ratio, intr_key='intr_ori', extr_key='extr_ori')
+            data, proj_mat = get_novel_calib(data, self.cfg.dataset, ratio=ratio, intr_key='intr_ori', extr_key='extr_ori')
             with torch.no_grad():
                 data, _, _ = self.model(data, is_train=False)
                 orig_view = data['novel_view']['world_view_transform'][0].clone()
-                orig_full = data['novel_view']['full_proj_transform'][0].clone()
-
-                test_ipd = 0.3
+                #orig_full = data['novel_view']['full_proj_transform'][0].clone()
+                test_ipd = 0.9
                 shift_l = torch.eye(4, device='cuda')
                 shift_l[0, 3] = -(test_ipd / 2.0)
         
                 shift_r = torch.eye(4, device='cuda')
                 shift_r[0, 3] = (test_ipd / 2.0)
                 data_left = copy.deepcopy(data)
-                data_left['novel_view']['world_view_transform'] = (orig_view @ shift_l).unsqueeze(0)
-                data_left['novel_view']['full_proj_transform'] = (orig_view @ shift_l).unsqueeze(0)
+                data_left['novel_view']['world_view_transform'][0, 3, 0] -= (test_ipd / 2.0)
+                data_left['novel_view']['full_proj_transform'] = torch.bmm(data_left['novel_view']['world_view_transform'], proj_mat.cuda().unsqueeze(0))
+                data_left['novel_view']['camera_center'] = data_left['novel_view']['world_view_transform'].inverse()[0,3, :3].unsqueeze(0)
 
                 data_right = copy.deepcopy(data)
-                data_right['novel_view']['world_view_transform'] = (orig_view @ shift_r).unsqueeze(0)
-                data_right['novel_view']['full_proj_transform'] = (orig_view @ shift_r).unsqueeze(0)
-                output_left, output_right, output  = pts2render(data = data_left,data_r = data_right, data_or = data, bg_color=self.cfg.dataset.bg_color)
+                data_right['novel_view']['world_view_transform'][0, 3, 0] += (test_ipd / 2.0)
+                data_right['novel_view']['full_proj_transform'] = torch.bmm(data_right['novel_view']['world_view_transform'], proj_mat.cuda().unsqueeze(0))
+                data_right['novel_view']['camera_center'] = data_right['novel_view']['world_view_transform'].inverse()[0,3, :3].unsqueeze(0)
+                output_left, output_right = pts2render(data = data_left,data_r = data_right, bg_color=self.cfg.dataset.bg_color)
+                print(f"{data_left['novel_view']['world_view_transform'][0, 3, 0]}")
+                print(f"{data_right['novel_view']['world_view_transform'][0, 3, 0]}")
                 #output_right = pts2render(data_right, bg_color=self.cfg.dataset.bg_color)
                 #data = pts2render(data, bg_color=self.cfg.dataset.bg_color)
-            render_origin = self.tensor2np(output['novel_view']['img_pred']).copy()
+            #render_origin = self.tensor2np(output['novel_view']['img_pred']).copy()
             render_l = self.tensor2np(output_left['novel_view']['img_pred']).copy()
             render_r = self.tensor2np(output_right['novel_view']['img_pred']).copy()
             h, w, _ = render_l.shape
@@ -67,7 +70,7 @@ class StereoHumanRender:
             
             cv2.rectangle(render_l, (0, 0), (w, h), (0, 0, 255), 10)
             cv2.rectangle(render_r, (0, 0), (w, h), (255, 0, 0), 10)
-            render_novel = np.concatenate([render_l, render_r, render_origin], axis = 1)
+            render_novel = np.concatenate([render_l, render_r], axis = 1)
             diff = torch.abs(output_left['novel_view']['img_pred'].float() - output_right['novel_view']['img_pred'].float())
             print(f"Max Diff: {diff.max().item()}")
             #render_novel = self.tensor2np(data['novel_view']['img_pred'])
