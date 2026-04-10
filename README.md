@@ -6,6 +6,13 @@ conda env create --file environment.yml
 conda activate gps_gaussian
 ```
 
+opengl install
+```bash
+pip install PyOpenGL PyOpenGL_accelerate
+pip install glfw
+pip install PySide6
+```
+
 gaussian rasterization install
 ```bash
 git clone https://github.com/graphdeco-inria/gaussian-splatting --recursive
