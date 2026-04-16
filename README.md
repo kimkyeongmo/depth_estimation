@@ -20,6 +20,39 @@ cd gaussian-splatting/
 pip install -e submodules/diff-gaussian-rasterization
 cd ..
 ```
+
+GLFW install
+```bash
+sudo apt-get install libglfw3-dev
+```
+pybind/glfw file install
+
+pybind c++ code compile
+```
+PYTHON_INCLUDE=$(python3 -c "import sysconfig; print(sysconfig.get_path('include'))")
+PYBIND_INCLUDE=$(python3 -c "import pybind11; print(pybind11.get_include())")
+TORCH_INCLUDE=$CONDA_PREFIX/lib/python3.10/site-packages/torch/include
+TORCH_LIB=$CONDA_PREFIX/lib/python3.10/site-packages/torch/lib
+CUDA_HOME=/usr/local/cuda
+
+g++ -O2 -shared -fPIC -std=c++17 \
+    -I${PYTHON_INCLUDE} \
+    -I${PYBIND_INCLUDE} \
+    -I${TORCH_INCLUDE} \
+    -I${TORCH_INCLUDE}/torch/csrc/api/include \
+    -I${CUDA_HOME}/include \
+    -Ipybind/glad/include \
+    pybind/glad/src/glad.c \
+    pybind/CudaRuntime1/CudaRuntime1/viewer.cpp \
+    -L${TORCH_LIB} \
+    -L${CUDA_HOME}/lib64 \
+    -ltorch -ltorch_python -lc10 -lc10_cuda -ltorch_cuda -ltorch_cpu \
+    -lcudart \
+    -lGL -lglfw \
+    -Wl,-rpath,${TORCH_LIB} \
+    -o CudaRuntime1.so
+```
+
 ### Testing
 1. 모델 가중치(Checkpoint) 준비
 사전 학습된 모델 파일(.pth)을 프로젝트 루트 디렉토리에 위치시킵니다.
