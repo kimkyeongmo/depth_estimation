@@ -5,6 +5,10 @@ import logging
 import numpy as np
 import cv2
 import os
+import sys
+sys.path.append("./pybind (CudaRuntime.so file)")
+import CudaRuntime1
+
 from pathlib import Path
 from tqdm import tqdm
 from OpenGL.GL import *
@@ -30,7 +34,7 @@ class StereoHumanRender:
         self.bs = self.cfg.batch_size
         self.model = RtStereoHumanModel(self.cfg, with_gs_render=True)
         self.dataset = StereoHumanDataset(self.cfg.dataset, phase=phase)
-        self.shader_program = self.load_shader(r'.\lib\distortion.vert', r'.\lib\distortion.frag')
+        # self.shader_program = self.load_shader(r'.\lib\distortion.vert', r'.\lib\distortion.frag')
         self.model.cuda()
         if self.cfg.restore_ckpt:
             self.load_ckpt(self.cfg.restore_ckpt)
@@ -38,6 +42,7 @@ class StereoHumanRender:
    
    #Stereo/HMD Rendering Pipeline
     def infer_seqence(self, view_select, ratio=0.5):
+        CudaRuntime1.init_window(2048, 1028)
 #        ipd = 6.05
         total_frames = len(os.listdir(os.path.join(self.cfg.dataset.test_data_root, 'img')))
         for idx in tqdm(range(total_frames)):
@@ -67,8 +72,25 @@ class StereoHumanRender:
                 # print(f"{data_left['novel_view']['world_view_transform'][0, 3, 0]}")
                 # print(f"{data_right['novel_view']['world_view_transform'][0, 3, 0]}")
             #Real time display
-            self.gl_display(output_left['novel_view']['img_pred'], output_right['novel_view']['img_pred'])
+            #self.gl_display(output_left['novel_view']['img_pred'], output_right['novel_view']['img_pred'])
+            
+            left_img = output_left['novel_view']['img_pred']
+            left_img = torch.nn.functional.interpolate(left_img, scale_factor=0.5, mode='bilinear', align_corners=False)
+            left_img = left_img[0].permute(1,2,0).contiguous()
 
+            alpha = torch.ones(*left_img.shape[:2], 1, dtype=torch.float32, device=left_img.device)
+            left_img_rgba = torch.cat([left_img, alpha], dim=2).contiguous()
+
+            right_img = output_right['novel_view']['img_pred']
+            right_img = torch.nn.functional.interpolate(right_img, scale_factor=0.5, mode='bilinear', align_corners=False)
+            right_img = right_img[0].permute(1,2,0).contiguous()
+
+            alpha = torch.ones(*right_img.shape[:2], 1, dtype=torch.float32, device=right_img.device)
+            right_img_rgba = torch.cat([right_img, alpha], dim=2).contiguous()
+            
+            stereo = torch.cat([right_img_rgba, left_img_rgba], dim=1).contiguous()
+
+            CudaRuntime1.show_tensor(stereo)
             
                 #output_right = pts2render(data_right, bg_color=self.cfg.dataset.bg_color)
                 #data = pts2render(data, bg_color=self.cfg.dataset.bg_color)
@@ -87,58 +109,7 @@ class StereoHumanRender:
             #render_novel = self.tensor2np(data['novel_view']['img_pred'])
             #cv2.imwrite(self.cfg.test_out_path + '/%s_novel.jpg' % (data['name']), render_novel)
 
-    def gl_display(self, render_l, render_r):
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
-        glViewport(0,0,960, 1080)
-        self.gl_cal(render_l)
-        glViewport(960, 0, 960, 1080)
-        self.gl_cal(render_r)
-        glutSwapBuffers()
-        glutMainLoopEvent()
-        cv2.waitKey(1)
         
-    def gl_cal(self, img_render):
-        
-        #shader
-        glUseProgram(self.shader_program)
-        glActiveTexture(GL_TEXTURE0)
-        #tex_id에 2D텍스쳐 작업 할당
-        glBindTexture(GL_TEXTURE_2D, self.tex_id)
-        #해당 변수명에 값 전달
-        glUniform1i(glGetUniformLocation(self.shader_program, "screenTexture"), 0)
-        glUniform1f(glGetUniformLocation(self.shader_program, "K1"), 1.0)
-        glUniform1f(glGetUniformLocation(self.shader_program, "K2"), 1.0)
-        
-        img_data = img_render.squeeze(0).permute(1,2,0).contiguous()
-        torch.cuda.synchronize()
-
-        #GPU memory to CPU memory (testing)
-        img_np = img_render.squeeze(0).permute(1, 2, 0).detach().cpu().numpy().astype(np.float32)
-        H, W, _ = img_np.shape
-        #img_data = img_render.squeeze(0).permute(1,2,0).contiguous()
-        torch.cuda.synchronize()
-        #glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, W, H, 0, GL_RGB, GL_FLOAT, img_data.data_ptr())
-        #texture mapping
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, W, H, 0, GL_RGB, GL_FLOAT, img_np)
-        glBegin(GL_QUADS)
-        glTexCoord2f(0, 1); glVertex2f(-1, -1)
-        glTexCoord2f(1, 1); glVertex2f(1, -1)
-        glTexCoord2f(1, 0); glVertex2f(1, 1)
-        glTexCoord2f(0, 0); glVertex2f(-1, 1)
-        glEnd()
-        #shader 0
-        glUseProgram(0)
-        
-    def load_shader(self, vert_path, frag_path):
-        with open(vert_path, 'r', encoding='utf-8') as f:
-            vert_code = f.read()
-        with open(frag_path, 'r', encoding='utf-8') as f:
-            frag_code = f.read()
-        vs = shaders.compileShader(vert_code, GL_VERTEX_SHADER)
-        fs = shaders.compileShader(frag_code, GL_FRAGMENT_SHADER)
-        return shaders.compileProgram(vs, fs, validate=False)
-        
-    
     #gpu memory to cpu memroy
     def tensor2np(self, img_tensor):
         img_np = img_tensor.permute(0, 2, 3, 1)[0].detach().cpu().numpy()
@@ -162,20 +133,6 @@ class StereoHumanRender:
 
 
 if __name__ == '__main__':
-    import sys
-    glutInit(sys.argv)
-    glutInitDisplayMode(GLUT_RGBA | GLUT_DOUBLE | GLUT_DEPTH)
-    glutInitWindowSize(1920, 1080)
-    glutCreateWindow(b"Test")
-    glutDisplayFunc(lambda: None)
-    
-    
-    glEnable(GL_TEXTURE_2D)
-    tex_id = glGenTextures(1)
-    glBindTexture(GL_TEXTURE_2D, tex_id)
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR)
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR)
-
 
     logging.basicConfig(level=logging.INFO,
                         format='%(asctime)s %(levelname)-8s [%(filename)s:%(lineno)d] %(message)s')
@@ -201,5 +158,4 @@ if __name__ == '__main__':
     cfg.freeze()
 
     render = StereoHumanRender(cfg, phase='test')
-    render.tex_id = tex_id
     render.infer_seqence(view_select=arg.src_view, ratio=arg.ratio)
