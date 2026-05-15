@@ -214,8 +214,8 @@ if __name__ == '__main__':
     cam_nums = 16
     scene_radius = 2.0
     res = (1024, 1024)
-    thuman_root = 'PATH/TO/THuman2.0'
-    save_root = 'PATH/TO/SAVE/RENDERED/DATA'
+    thuman_root = 'E:\THuman2.0'
+    save_root = 'E:\THuman2.0\rendered_data'
 
     np.random.seed(1314)
     renderer = StaticRenderer(src_res=res)
