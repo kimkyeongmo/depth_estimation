@@ -7,6 +7,8 @@
 checkpoints/
 experiments/
 logs/
+submodules/
+
 
 # ==========================================
 # 2. TensorRT 엔진 (기기 및 환경에 종속적이므로 제외)
