@@ -84,7 +84,7 @@ def get_video_rotation(vid_path):
     except:
         return 0
 
-def run_ultimate_streaming_inference(vid_path, ckpt_path, engine_dir, ref_intr_path, out_dir):
+def run_ultimate_streaming_inference_filtered(vid_path, ckpt_path, engine_dir, ref_intr_path, out_dir):
     os.makedirs(out_dir, exist_ok=True)
     out_name = Path(vid_path).stem
 
@@ -95,19 +95,16 @@ def run_ultimate_streaming_inference(vid_path, ckpt_path, engine_dir, ref_intr_p
     cfg.dataset.src_res = 504
     cfg.freeze()
 
-    print("Loading PyTorch Checkpoints...")
     base_model = VDAGaussianModel(cfg, with_gs_render=True)
     ckpt = torch.load(ckpt_path, map_location='cpu', weights_only=False)
     base_model.load_state_dict(ckpt['network'], strict=True)
     vda_weights = base_model.vda_model.state_dict()
     del base_model 
 
-    print("Initializing Stateful VDA Streamer...")
     vda_stream = StreamingVDA(encoder='vits', features=64, out_channels=[48, 96, 192, 384])
     vda_stream.load_state_dict(vda_weights, strict=True)
     vda_stream = vda_stream.cuda().eval()
 
-    print("Loading TensorRT Engines & RVM...")
     unet_trt = TRTWrapper(os.path.join(engine_dir, "unet_extractor.engine"))
     gs_trt = TRTWrapper(os.path.join(engine_dir, "gs_regresser.engine"))
     
@@ -144,14 +141,14 @@ def run_ultimate_streaming_inference(vid_path, ckpt_path, engine_dir, ref_intr_p
     if fps == 0 or np.isnan(fps): fps = 30.0
     vid_rotation = get_video_rotation(vid_path)
 
-    print(f"\nProcessing Video: {total_frames} frames @ {fps} FPS")
-
-    out_mp4 = os.path.join(out_dir, out_name + "_FlickerFree_UltraFast.mp4")
+    out_mp4 = os.path.join(out_dir, out_name + "_Filtered_Stream.mp4")
     video_writer = imageio.get_writer(out_mp4, fps=fps, macro_block_size=1)
 
     rec = [None] * 4 
-    
-    # 지표 분리: VRAM 데이터 전송은 초(s) 단위 누적, 나머지는 ms 연산
+    prev_depth, prev_rot, prev_scale, prev_opacity = None, None, None, None
+    outlier_threshold = 0.01
+    ema_alpha = 0.9
+
     time_vram_total = 0.0
     time_prep = 0.0
     time_unet = 0.0
@@ -166,8 +163,7 @@ def run_ultimate_streaming_inference(vid_path, ckpt_path, engine_dir, ref_intr_p
 
     t_pipeline_start = time.perf_counter()
 
-    for frame_idx in tqdm(range(total_frames), desc="Ultra-Fast Streaming Inference"):
-        # 1. Video I/O
+    for frame_idx in tqdm(range(total_frames), desc="Robust Streaming Inference"):
         t_io_start = time.perf_counter()
         ret, frame = cap.read()
         if not ret: break
@@ -180,14 +176,13 @@ def run_ultimate_streaming_inference(vid_path, ckpt_path, engine_dir, ref_intr_p
         t_io_end = time.perf_counter()
         time_io += (t_io_end - t_io_start) * 1000
 
-        # 💡 2. VRAM Allocation & Data Transfer (격리 측정)
+        # 💡 VRAM Allocation 격리
         t_vram_start = time.perf_counter()
         img_tensor_raw = torch.from_numpy(frame_rgb).float().permute(2, 0, 1).unsqueeze(0).cuda() / 255.0
         torch.cuda.synchronize()
         t_vram_end = time.perf_counter()
-        time_vram_total += (t_vram_end - t_vram_start)  # 프레임으로 나누지 않을 전체 누적 시간
+        time_vram_total += (t_vram_end - t_vram_start)
 
-        # 💡 3. 순수 GPU Pre-processing (RVM & Tensor Ops)
         t_prep_start = time.perf_counter()
         with torch.no_grad():
             b, c, h, w = img_tensor_raw.shape
@@ -203,18 +198,15 @@ def run_ultimate_streaming_inference(vid_path, ckpt_path, engine_dir, ref_intr_p
         t_prep_end = time.perf_counter()
         time_prep += (t_prep_end - t_prep_start) * 1000
 
-        # 4. VDA Inference
         start_event.record()
         depth_np = vda_stream.infer_video_depth_one(img_504_np, input_size=504, device='cuda', fp32=True)
         end_event.record()
         torch.cuda.synchronize()
         time_vda += start_event.elapsed_time(end_event)
 
-        # (이 작은 변환은 VDA 블록 내부 처리로 간주)
         depth_pred = torch.from_numpy(depth_np).float().unsqueeze(0).unsqueeze(0).cuda()
         img_gps = img_tensor * 2.0 - 1.0
 
-        # 5. U-Net & GS Regresser
         with torch.no_grad():
             start_event.record()
             unet_out = unet_trt(input_image_gps=img_gps)
@@ -228,11 +220,27 @@ def run_ultimate_streaming_inference(vid_path, ckpt_path, engine_dir, ref_intr_p
             rot = gs_out['rot_maps']
             scale = gs_out['scale_maps']
             opacity = gs_out['opacity_maps']
+
+            if prev_depth is None:
+                prev_depth, prev_rot, prev_scale, prev_opacity = depth_pred, rot, scale, opacity
+            else:
+                global_diff = torch.abs(depth_pred - prev_depth).mean().item()
+                if global_diff > outlier_threshold:
+                    depth_pred = prev_depth
+                    rot = prev_rot
+                    scale = prev_scale
+                    opacity = prev_opacity
+                else:
+                    depth_pred = ema_alpha * depth_pred + (1.0 - ema_alpha) * prev_depth
+                    rot = F.normalize(ema_alpha * rot + (1.0 - ema_alpha) * prev_rot, p=2, dim=1, eps=1e-6)
+                    scale = ema_alpha * scale + (1.0 - ema_alpha) * prev_scale
+                    opacity = ema_alpha * opacity + (1.0 - ema_alpha) * prev_opacity
+                    prev_depth, prev_rot, prev_scale, prev_opacity = depth_pred, rot, scale, opacity
+            
             end_event.record()
             torch.cuda.synchronize()
             time_gs += start_event.elapsed_time(end_event)
 
-        # 6. Rendering
         t_render_start = time.perf_counter()
         bs = img_tensor.shape[0]
         data = {'view_0': {'img': img_tensor, 'mask': mask_tensor, 'intr': intr_tensor_504, 'extr': extr_tensor}}
@@ -276,7 +284,6 @@ def run_ultimate_streaming_inference(vid_path, ckpt_path, engine_dir, ref_intr_p
         t_render_end = time.perf_counter()
         time_render += (t_render_end - t_render_start) * 1000
 
-        # 7. Video Write I/O
         t_io_start = time.perf_counter()
         video_writer.append_data(render_img_1008.cpu().numpy())
         t_io_end = time.perf_counter()
@@ -296,10 +303,10 @@ def run_ultimate_streaming_inference(vid_path, ckpt_path, engine_dir, ref_intr_p
     avg_io = time_io / processed_frames if processed_frames > 0 else 0
     
     avg_network = avg_unet + avg_vda + avg_gs
-    avg_cuda_pure = avg_prep + avg_network + avg_render # 순수 GPU 연산 합산
+    avg_cuda_pure = avg_prep + avg_network + avg_render
 
     print("\n===================================")
-    print(" [End-to-End Pipeline Profiling (Video Streaming)]")
+    print(" [End-to-End Pipeline Profiling (Filtered Streaming)]")
     print(" - VRAM Allocation & Data Transfer : {:.2f} s (Total Time)".format(time_vram_total))
     print("-----------------------------------")
     print(" [Per-Frame GPU Inference Time]")
@@ -318,7 +325,7 @@ def run_ultimate_streaming_inference(vid_path, ckpt_path, engine_dir, ref_intr_p
     print("===================================\n")
 
 if __name__ == "__main__":
-    VID_PATH = "input_video.mp4" 
+    VID_PATH = "input_video.mp4"
     CKPT_PATH = "experiments/VDA_GPS_0529_Finetune/ckpt/VDA_GPS_0529_Finetune_final.pth"
     ENGINE_DIR = "trt_engines"
     REF_INTR_PATH = "../thuman_120cm_render_data_mono/mono_uniform_504/val/parm/0000_000/0_intr.npy"
@@ -327,4 +334,4 @@ if __name__ == "__main__":
     if not os.path.exists(VID_PATH):
         print(f"\n[Error] 비디오 파일을 찾을 수 없습니다: {VID_PATH}")
     else:
-        run_ultimate_streaming_inference(VID_PATH, CKPT_PATH, ENGINE_DIR, REF_INTR_PATH, OUT_DIR)
+        run_ultimate_streaming_inference_filtered(VID_PATH, CKPT_PATH, ENGINE_DIR, REF_INTR_PATH, OUT_DIR)

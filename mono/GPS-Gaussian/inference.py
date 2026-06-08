@@ -19,6 +19,10 @@ from lib.utils import depth2pc
 cv2.setNumThreads(0)
 torch.set_float32_matmul_precision('high')
 
+
+import warnings
+warnings.filterwarnings("ignore", message=".*torch.meshgrid.*")
+
 def pad_to_square(img_np, is_mask=False):
     h, w = img_np.shape[:2]
     max_side = max(h, w)

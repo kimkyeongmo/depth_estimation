@@ -18,6 +18,10 @@ from lib.GaussianRender import pts2render
 from lib.graphics_utils import getWorld2View2, getProjectionMatrix, focal2fov
 from lib.utils import depth2pc
 
+import warnings
+warnings.filterwarnings("ignore", message=".*torch.meshgrid.*")
+
+
 cv2.setNumThreads(0)
 torch.set_float32_matmul_precision('high')
 
@@ -92,7 +96,13 @@ def run_mixed_inference(img_path, ckpt_path, engine_dir, ref_intr_path, out_dir)
     gs_trt = TRTWrapper(os.path.join(engine_dir, "gs_regresser.engine"))
 
     print("Loading RVM Model...")
-    rvm = torch.hub.load("PeterL1n/RobustVideoMatting", "mobilenetv3").cuda().eval()
+    hub_dir = torch.hub.get_dir()
+    rvm_cache_path = os.path.join(hub_dir, "PeterL1n_RobustVideoMatting_master")
+
+    if os.path.exists(rvm_cache_path):
+        rvm = torch.hub.load(rvm_cache_path, "mobilenetv3", source='local').cuda().eval()
+    else:
+        rvm = torch.hub.load("PeterL1n/RobustVideoMatting", "mobilenetv3").cuda().eval()
 
     # 💡 1. RVM을 포함한 모든 모델 Warm-up 선행 (지표 측정 분리)
     print("Running GPU Warm-up (RVM & Networks)...")
