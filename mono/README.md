@@ -40,6 +40,10 @@ GPS-Gaussian/ \
 └── val/(여기에 제공된 카메라 파라미터 파일들을 배치하세요) 
 
 
+인퍼런스 코드 실행 시 \
+trt가 붙은 코드들은 onnx_transfer.py --> make_engine.py 실행 후 \
+onnx_models 폴더와 trt_engines 폴더 및 각 파일들이 생성 된 뒤에 실행 가능
+
 🚀 실행 요약 \
 환경 설정이 완료된 후, GPS-Gaussian/ 폴더에서 아래와 같이 실행 가능합니다: 
 
