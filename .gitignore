@@ -1,0 +1,6 @@
+*.pyc
+/experiments
+/test_out
+/interp_out
+/gaussian-splatting/
+*.pth

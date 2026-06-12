@@ -1,0 +1,18 @@
+# 소스코드는 LF 유지 (Linux 호환)
+*.c     text eol=lf
+*.cpp   text eol=lf
+*.cu    text eol=lf
+*.h     text eol=lf
+*.py    text eol=lf
+*.md    text eol=lf
+*.txt   text eol=lf
+
+# Windows 전용 바이너리
+*.sln   text eol=crlf
+*.vcxproj text eol=crlf
+
+# 바이너리 파일 (변환 안 함)
+*.pyd   binary
+*.dll   binary
+*.so    binary
+*.lib   binary
