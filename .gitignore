@@ -4,3 +4,7 @@
 /interp_out
 /gaussian-splatting/
 *.pth
+*.png
+*.zip
+*.onnx
+*.engine

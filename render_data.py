@@ -215,7 +215,7 @@ if __name__ == '__main__':
     scene_radius = 2.0
     res = (512, 512)
     thuman_root = r'E:/THuman2.0'
-    save_root   = r'E:/THuman2.0/rendered_data_512'
+    save_root = r'E:/THuman2.0/rendered_data_512'
 
     np.random.seed(1314)
     renderer = StaticRenderer(src_res=res)

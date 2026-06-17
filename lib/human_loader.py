@@ -72,12 +72,12 @@ def stereo_pts2flow(pts0, pts1, rectify0, rectify1, Tf_x):
     new_depth1 = cv2.remap(new_depth1, rectify_mat1_x, rectify_mat1_y, cv2.INTER_LINEAR)
 
     offset0 = new_intr1[0, 2] - new_intr0[0, 2]
-    disparity0 = -new_depth0 * Tf_x
-    flow0 = offset0 - disparity0
+    disparity0 = -new_depth0 * Tf_x          # 양수 disparity
+    flow0 = disparity0 + offset0              # CALIB_ZERO_DISPARITY → offset=0, flow=disparity
 
     offset1 = new_intr0[0, 2] - new_intr1[0, 2]
-    disparity1 = -new_depth1 * (-Tf_x)
-    flow1 = offset1 - disparity1
+    disparity1 = -new_depth1 * (-Tf_x)       # 양수 disparity
+    flow1 = disparity1 + offset1              # CALIB_ZERO_DISPARITY → offset=0, flow=disparity
 
     flow0[new_depth0 < 0.05] = 0
     flow1[new_depth1 < 0.05] = 0
@@ -122,10 +122,13 @@ class StereoHumanDataset(Dataset):
             self.local_valid_path = os.path.join(self.local_data_root, 'valid/%s/%d.png')
             self.local_parm_path = os.path.join(self.local_data_root, 'parm/%s/%d_%d.json')
 
-            if os.path.exists(self.local_data_root):
+            force_regen = getattr(opt, 'force_regenerate', False)
+            if os.path.exists(self.local_data_root) and not force_regen:
                 assert len(os.listdir(os.path.join(self.local_data_root, 'img'))) == len(self.sample_list)
                 logging.info(f"Using local data in {self.local_data_root} ...")
             else:
+                if force_regen:
+                    logging.info(f"force_regenerate=True: 기존 캐시를 덮어씁니다.")
                 self.save_local_stereo_data()
 
     def save_local_stereo_data(self):
@@ -259,7 +262,9 @@ class StereoHumanDataset(Dataset):
         R, T = E[:3, :3], E[:3, 3]
         dist0, dist1 = np.zeros(4), np.zeros(4)
 
-        R0, R1, P0, P1, _, _, _ = cv2.stereoRectify(intr0, dist0, intr1, dist1, (W, H), R, T, flags=0)
+        # CALIB_ZERO_DISPARITY: 좌우 P의 cx를 동일하게 맞춰 offset=0 보장
+        # flags=0이면 cx가 달라져 GT flow에 offset이 혼입됨
+        R0, R1, P0, P1, _, _, _ = cv2.stereoRectify(intr0, dist0, intr1, dist1, (W, H), R, T, flags=cv2.CALIB_ZERO_DISPARITY)
 
         new_extr0 = R0 @ extr0
         new_intr0 = P0[:3, :3]
@@ -317,18 +322,26 @@ class StereoHumanDataset(Dataset):
         return stereo_data
 
     def stereo_to_dict_tensor(self, stereo_data, subject_name):
+        # ImageNet mean (RGB, [-1,1] 정규화 기준)
+        # [0.485, 0.456, 0.406] * 2 - 1 = [−0.030, −0.088, −0.188]
+        _IMAGENET_MEAN = torch.tensor([-0.030, -0.088, -0.188]).view(3, 1, 1)
+
         img_tensor, mask_tensor = [], []
         for (img_view, mask_view) in [('img0', 'mask0'), ('img1', 'mask1')]:
             img = torch.from_numpy(stereo_data[img_view]).permute(2, 0, 1)
             img = 2 * (img / 255.0) - 1.0
             mask = torch.from_numpy(stereo_data[mask_view]).permute(2, 0, 1).float()
             mask = mask / 255.0
+            mask_bin = (mask >= 0.5).float()
 
-            img = img * mask
-            mask[mask < 0.5] = 0.0
-            mask[mask >= 0.5] = 1.0
+            # 배경을 0(검정) 대신 ImageNet mean으로 채움
+            # → 인체 경계부 cost volume 왜곡 방지
+            img = img * mask_bin + _IMAGENET_MEAN * (1.0 - mask_bin)
+
+            mask_bin[mask_bin < 0.5] = 0.0
+            mask_bin[mask_bin >= 0.5] = 1.0
             img_tensor.append(img)
-            mask_tensor.append(mask)
+            mask_tensor.append(mask_bin)
 
         lmain_data = {
             'img': img_tensor[0],
