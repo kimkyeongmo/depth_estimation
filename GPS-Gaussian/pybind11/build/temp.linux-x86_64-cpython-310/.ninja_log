@@ -1,0 +1,3 @@
+# ninja log v7
+0	165	1781269705466481052	/home/com/my_vision_project/depth_estimation/mono/GPS-Gaussian/pybind11/build/temp.linux-x86_64-cpython-310/src/glad.o	f387da26104d51e8
+1	10804	1781269705467917509	/home/com/my_vision_project/depth_estimation/mono/GPS-Gaussian/pybind11/build/temp.linux-x86_64-cpython-310/viewer.o	d60d855da5c2358d

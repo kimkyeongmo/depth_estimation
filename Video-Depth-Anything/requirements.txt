@@ -1,0 +1,18 @@
+# --- [버전 충돌 방지를 위해 강제 고정한 핵심 패키지] ---
+numpy==1.26.4
+opencv-python==4.10.0.84
+imageio==2.27.0
+imageio-ffmpeg==0.4.7
+
+# --- [나머지 필수 도구들] ---
+matplotlib
+pillow
+decord
+xformers==0.0.23
+einops==0.4.1
+easydict
+tqdm
+OpenEXR==3.3.1
+
+# 주의: torch와 torchvision은 이 파일에서 제거했습니다. 
+# 반드시 conda install pytorch ... 명령어로 별도 설치해야 합니다.
